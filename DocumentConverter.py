@@ -5,7 +5,7 @@
 # This script converts a document from one office format to another by
 # connecting to an OpenOffice.org instance via Python-UNO bridge.
 #
-# Copyright (C) 2009 Alistek Ltd. (www.alistek.com) 
+# Copyright (C) 2009 Alistek Ltd. (www.alistek.com)
 # Licensed under the GNU LGPL v2.1 - http://www.gnu.org/licenses/lgpl-2.1.html
 # - or any later version.
 #
@@ -39,11 +39,12 @@ from com.sun.star.beans import UnknownPropertyException
 from com.sun.star.lang import IllegalArgumentException, DisposedException
 from com.sun.star.io import XOutputStream
 from com.sun.star.document.UpdateDocMode import QUIET_UPDATE
-from com.sun.star.document.MacroExecMode import NEVER_EXECUTE
+from com.sun.star.document.MacroExecMode import NEVER_EXECUTE, ALWAYS_EXECUTE_NO_WARN
 from com.sun.star.style.BreakType import PAGE_AFTER, PAGE_BEFORE, PAGE_BOTH
 from com.sun.star.text.ControlCharacter import PARAGRAPH_BREAK, APPEND_PARAGRAPH
 
-SECTIONMAXLEVEL = 10 # Just to make sure we do not go into endless loop
+SECTIONMAXLEVEL = 10  # Just to make sure we do not go into endless loop
+
 
 class DocumentConversionException(Exception):
 
@@ -53,8 +54,10 @@ class DocumentConversionException(Exception):
     def __str__(self):
         return self.message
 
+
 class OutputStreamWrapper(unohelper.Base, XOutputStream):
     """ Minimal Implementation of XOutputStream """
+
     def __init__(self, debug=True):
         self.debug = debug
         self.data = BytesIO()
@@ -77,13 +80,15 @@ class OutputStreamWrapper(unohelper.Base, XOutputStream):
         if self.debug:
             sys.stderr.write("Flushing output.\n")
         pass
+
     def closeOutput(self):
         if self.debug:
             sys.stderr.write("Closing output.\n")
         pass
 
+
 class DocumentConverter:
-   
+
     def __init__(self, host='localhost', port=DEFAULT_OPENOFFICE_PORT, ooo_restart_cmd=None):
         self._host = host
         self._port = port
@@ -103,16 +108,18 @@ class DocumentConverter:
                 try:
                     self.connectOffice()
                 except NoConnectException as exception:
-                    raise DocumentConversionException("Failed to connect to OpenOffice.org on host %s, port %s. %s" % (host, port, exception))
+                    raise DocumentConversionException(
+                        "Failed to connect to OpenOffice.org on host %s, port %s. %s" % (host, port, exception))
             else:
-                raise DocumentConversionException("Failed to connect to OpenOffice.org on host %s, port %s. %s" % (host, port, exception))
+                raise DocumentConversionException(
+                    "Failed to connect to OpenOffice.org on host %s, port %s. %s" % (host, port, exception))
 
         except ConnectionSetupException as exception:
             raise DocumentConversionException("Not possible to accept on a local resource (%s)" % exception)
 
     def connectOffice(self):
         self._context = self._resolver.resolve(RESOLVESTR % (self._host, self._port))
-    
+
     def _createDesktop(self):
         try:
             smanager = self._context.ServiceManager
@@ -121,7 +128,7 @@ class DocumentConverter:
         except UnknownPropertyException as e:
             self.connectOffice()
             self._createDesktop()
-    
+
     def putDocument(self, data, filter_name=False, read_only=False):
         """
         Uploads document to office service
@@ -135,17 +142,17 @@ class DocumentConverter:
             self.connectOffice()
             self._createDesktop()
         inputStream = self._initStream(data)
-        properties = {'InputStream':inputStream}
-        properties.update({'Hidden':True})
-        properties.update({'UpdateDocMode':QUIET_UPDATE})
-        properties.update({'ReadOnly':read_only})
-        properties.update({'MacroExecutionMode': NEVER_EXECUTE})
-        
-        #TODO Minor performance improvement by supplying MediaType property
-        #properties.update({'MediaType':'application/vnd.oasis.opendocument.text'})
-        
+        properties = {'InputStream': inputStream}
+        properties.update({'Hidden': True})
+        properties.update({'UpdateDocMode': QUIET_UPDATE})
+        properties.update({'ReadOnly': read_only})
+        properties.update({'MacroExecutionMode': ALWAYS_EXECUTE_NO_WARN})
+
+        # TODO Minor performance improvement by supplying MediaType property
+        # properties.update({'MediaType':'application/vnd.oasis.opendocument.text'})
+
         if filter_name:
-            properties.update({'FilterName':filter_name})
+            properties.update({'FilterName': filter_name})
         props = self._toProperties(**properties)
         try:
             self.document = self.desktop.loadComponentFromURL('private:stream', '_blank', 0, props)
@@ -159,11 +166,11 @@ class DocumentConverter:
         except Exception as e:
             exceptionType, exceptionValue, exceptionTraceback = sys.exc_info()
             traceback.print_exception(exceptionType, exceptionValue,
-                            exceptionTraceback, limit=2, file=sys.stdout)
+                                      exceptionTraceback, limit=2, file=sys.stdout)
         inputStream.closeInput()
 
     def closeDocument(self):
-        if hasattr(self,'document'):
+        if hasattr(self, 'document'):
             if self.document is not None:
                 self.document.close(True)
                 del self.document
@@ -183,7 +190,7 @@ class DocumentConverter:
         else:
             for inc in range(0, indexes.getCount()):
                 indexes.getByIndex(inc).update()
-        
+
     def saveByStream(self, filter_name=None):
         """
         Downloads document from office service
@@ -196,12 +203,12 @@ class DocumentConverter:
             properties.update({"FilterOptions": CSVFilterOptions})
         props = self._toProperties(**properties)
         try:
-            #url = uno.systemPathToFileUrl(path) #when storing to filesystem
+            # url = uno.systemPathToFileUrl(path) #when storing to filesystem
             self.document.storeToURL('private:stream', props)
         except Exception as exception:
             exceptionType, exceptionValue, exceptionTraceback = sys.exc_info()
             traceback.print_exception(exceptionType, exceptionValue,
-                            exceptionTraceback, limit=2, file=sys.stdout)
+                                      exceptionTraceback, limit=2, file=sys.stdout)
         openDocumentBytes = outputStream.data.getvalue()
         outputStream.close()
         return openDocumentBytes
@@ -226,10 +233,10 @@ class DocumentConverter:
             subStream = self._initStream(subdata)
             search = self.document.createSearchDescriptor()
             search.SearchString = placeholder_text
-            found = self.document.findFirst( search )
-            #while found:
-            properties = {'InputStream':subStream}
-            properties.update({'FilterName':"writer8"})
+            found = self.document.findFirst(search)
+            # while found:
+            properties = {'InputStream': subStream}
+            properties.update({'FilterName': "writer8"})
             props = self._toProperties(**properties)
             try:
                 found.insertDocumentFromURL('private:stream', props)
@@ -237,7 +244,7 @@ class DocumentConverter:
                 print("Error inserting file %s on the OpenOffice document: %s" % (subreport, ex))
                 exceptionType, exceptionValue, exceptionTraceback = sys.exc_info()
                 traceback.print_exception(exceptionType, exceptionValue,
-                                exceptionTraceback, limit=2, file=sys.stdout)
+                                          exceptionTraceback, limit=2, file=sys.stdout)
             #found = self.document.findNext(found, search)
 
             os.unlink(subreport)
@@ -250,23 +257,23 @@ class DocumentConverter:
         # Seemingly not needed
         #parastyles = stylefamilies.getByName('ParagraphStyles')
         #defaultparatyle = parastyles.getElementNames()[0]
-        
+
         text = self.document.Text
         cursor = text.createTextCursor()
         cursor.gotoStart(False)
-        
+
         # Get first page styles
         cursor.gotoStartOfParagraph(False)
         cursor.gotoEndOfParagraph(True)
-        
+
         pagestyle = cursor.PageDescName or defaultpagetyle
         # Seemingly not needed
         parastyle = cursor.ParaStyleName or defaultparatyle
-        
+
         for doc in docs_iter:
             subStream = self._initStream(doc)
-            properties = {'InputStream':subStream}
-            properties.update({'FilterName':filter_name})
+            properties = {'InputStream': subStream}
+            properties.update({'FilterName': filter_name})
             props = self._toProperties(**properties)
             try:
                 cursor.gotoEnd(False)
@@ -296,7 +303,7 @@ class DocumentConverter:
                 # Seemingly not needed
                 #cursor.ParaStyleName = parastyle
                 self.document.Text.getEnd().insertDocumentFromURL('private:stream', props)
-                
+
             except Exception as e:
                 print("Error inserting file %s bytes on the OpenOffice document: %s" % (len(doc), e))
                 raise e
@@ -339,10 +346,9 @@ class DocumentConverter:
             retcode = subprocess.call(self._ooo_restart_cmd, shell=True)
             if retcode == 0:
                 self.logger.warning('Restart successfull')
-                time.sleep(4) # Let some time for LibO/OOO to be fully started
+                time.sleep(4)  # Let some time for LibO/OOO to be fully started
             else:
                 self.logger.error('Restart script failed with return code %d' % retcode)
         except OSError as e:
             self.logger.error('Failed to execute the restart script. OS error: %s' % e)
         return True
-

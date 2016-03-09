@@ -38,34 +38,40 @@ from DocumentConverter import DocumentConverter, DocumentConversionException
 
 MAXINT = 9223372036854775807
 
-filters = {'pdf':'writer_pdf_Export',   # PDF - Portable Document Format
-           'odt':'writer8', #ODF Text Document
-           'ods':'calc8',   # ODF Spreadsheet
-           'doc':'MS Word 97',  # Microsoft Word 97/2000/XP
-           'xls':'MS Excel 97', # Microsoft Excel 97/2000/XP
-           'csv':'Text - txt - csv (StarCalc)', # Text CSV
-          }
+filters = {'pdf': 'writer_pdf_Export',   # PDF - Portable Document Format
+           'odt': 'writer8',  # ODF Text Document
+           'ods': 'calc8',   # ODF Spreadsheet
+           'doc': 'MS Word 97',  # Microsoft Word 97/2000/XP
+           'xls': 'MS Excel 97',  # Microsoft Excel 97/2000/XP
+           'csv': 'Text - txt - csv (StarCalc)',  # Text CSV
+           }
+
 
 class AccessException(Exception):
     pass
-    
+
+
 class NoidentException(Exception):
     pass
 
+
 class NodataException(Exception):
     pass
-    
+
+
 class NoOfficeConnection(Exception):
     pass
 
+
 class OfficeService():
+
     def __init__(self, oo_host, oo_port, spool_dir, auth_type):
         self.oo_host = oo_host
         self.oo_port = oo_port
         self.spool_path = spool_dir + '/%s'
         self.auth = auth_type
         self._init_conn()
-    
+
     def _init_conn(self):
         logger = logging.getLogger('main')
         try:
@@ -73,7 +79,7 @@ class OfficeService():
         except DocumentConversionException as e:
             self.oservice = None
             logger.warning("Failed to initiate OpenOffice/LibreOffice connection.")
-    
+
     def _conn_healthy(self):
         if hasattr(self, 'oservice'):
             if self.oservice is not None:
@@ -91,10 +97,10 @@ class OfficeService():
         message = 'Failed to initiate connection to OpenOffice/LibreOffice three times in a row.'
         logger.warning(message)
         raise NoOfficeConnection(message)
-    
+
     def _chktime(self, start_time):
-        return '%s s' % str(round(time()-start_time, 6))
-    
+        return '%s s' % str(round(time() - start_time, 6))
+
     def convert(self, data=False, identifier=False, in_mime=False, out_mime=False, username=None, password=None):
         logger = logging.getLogger('main')
         if not self.auth(username, password):
@@ -112,7 +118,7 @@ class OfficeService():
         logger.debug("  connection test ok %s" % self._chktime(start_time))
         infilter = filters.get(in_mime, False)
         outfilter = filters.get(out_mime, False)
-        self.oservice.putDocument(data, filter_name=infilter, read_only=True)
+        self.oservice.putDocument(data, filter_name=infilter, read_only=False)
         logger.debug("  upload document to office %s" % self._chktime(start_time))
         try:
             conv_data = self.oservice.saveByStream(filter_name=outfilter)
@@ -129,21 +135,21 @@ class OfficeService():
 
     def _md5(self, data):
         return md5(data.encode()).hexdigest()
-        
+
     def upload(self, data=False, is_last=False, identifier=False, username=None, password=None):
         logger = logging.getLogger('main')
         logger.debug('Upload identifier: %s' % identifier)
         try:
             start_time = time()
-            
+
             if not self.auth(username, password):
                 raise AccessException('Access denied.')
             # NOTE:md5 conversion on file operations to prevent path injection attack
-            if identifier and not path.isfile(self.spool_path % '_'+self._md5(str(identifier))):
+            if identifier and not path.isfile(self.spool_path % '_' + self._md5(str(identifier))):
                 raise NoidentException('Wrong or no identifier.')
             elif data is False:
                 raise NodataException('No data to be converted.')
-            
+
             fname = ''
             # generate random identifier
             while not identifier:
@@ -151,15 +157,15 @@ class OfficeService():
                 fname = self._md5(str(new_ident))
                 logger.debug('  assigning new identifier %s' % new_ident)
                 # check if there is any other such files
-                identifier = not path.isfile(self.spool_path % '_'+fname) \
-                             and not path.isfile(self.spool_path % fname) \
-                             and new_ident or False
+                identifier = not path.isfile(self.spool_path % '_' + fname) \
+                    and not path.isfile(self.spool_path % fname) \
+                    and new_ident or False
             fname = fname or self._md5(str(identifier))
-            with open(self.spool_path % '_'+fname, "a") as tmpfile:
+            with open(self.spool_path % '_' + fname, "a") as tmpfile:
                 tmpfile.write(data)
-            logger.debug("  chunk finished %s" % self._chktime(start_time))            
+            logger.debug("  chunk finished %s" % self._chktime(start_time))
             if is_last:
-                rename(self.spool_path % '_'+fname, self.spool_path % fname)
+                rename(self.spool_path % '_' + fname, self.spool_path % fname)
                 logger.debug("  file finished")
             return {'identifier': identifier}
         except AccessException as e:
@@ -169,17 +175,17 @@ class OfficeService():
         except NodataException as e:
             raise e
         except:
-            import sys, traceback
+            import sys
+            import traceback
             exceptionType, exceptionValue, exceptionTraceback = sys.exc_info()
             traceback.print_exception(exceptionType, exceptionValue,
-            exceptionTraceback, limit=2, file=sys.stdout)
-            
-    
+                                      exceptionTraceback, limit=2, file=sys.stdout)
+
     def _readFile(self, ident):
         with open(self.spool_path % self._md5(str(ident)), "r") as tmpfile:
             data = tmpfile.read()
         return base64.b64decode(data)
-    
+
     def _readFiles(self, idents):
         logger = logging.getLogger('main')
         for ident in idents:
@@ -187,11 +193,10 @@ class OfficeService():
             data = self._readFile(ident)
             logger.debug("    read next file: %s +%s" % (ident, self._chktime(start_time)))
             yield data
-            
-        
+
     def join(self, idents, in_mime=False, out_mime=False, username=None, password=None):
         logger = logging.getLogger('main')
-        logger.debug('Join %s identifiers: %s' % (str(len(idents)),str(idents)))
+        logger.debug('Join %s identifiers: %s' % (str(len(idents)), str(idents)))
         if not self.auth(username, password):
             raise AccessException('Access denied.')
         start_time = time()
