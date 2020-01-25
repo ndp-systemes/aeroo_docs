@@ -215,6 +215,7 @@ def main():
                   'convert': oser.convert,
                   'upload': oser.upload,
                   'join': oser.join,
+                  'get_file': oser.get_file,
                  }
     
     app = JsonRpcApplication(rpcs = interfaces)

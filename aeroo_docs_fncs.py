@@ -27,6 +27,7 @@
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #
 ################################################################################
+import io
 import logging
 import base64
 from hashlib import md5
@@ -35,6 +36,8 @@ from os import path, rename, getpid
 from time import time, sleep
 from jsonrpc2 import JsonRpcException
 from DocumentConverter import DocumentConverter, DocumentConversionException
+from PyPDF2 import PdfFileMerger, utils
+import tempfile
 
 MAXINT = 9223372036854775807
 
@@ -62,8 +65,10 @@ class NodataException(Exception):
 class NoOfficeConnection(Exception):
     pass
 
+logger = logging.getLogger('main')
 
-class OfficeService():
+
+class OfficeService(object):
 
     def __init__(self, oo_host, oo_port, spool_dir, auth_type):
         self.oo_host = oo_host
@@ -73,7 +78,6 @@ class OfficeService():
         self._init_conn()
 
     def _init_conn(self):
-        logger = logging.getLogger('main')
         try:
             self.oservice = DocumentConverter(self.oo_host, self.oo_port)
         except DocumentConversionException as e:
@@ -86,7 +90,6 @@ class OfficeService():
                 return True
         else:
             self.oservice = None
-        logger = logging.getLogger('main')
         attempt = 0
         while self.oservice is None and attempt < 3:
             attempt += 1
@@ -101,8 +104,13 @@ class OfficeService():
     def _chktime(self, start_time):
         return '%s s' % str(round(time() - start_time, 6))
 
+    def get_file(self, ident, username=None, password=None):
+        if not self.auth(username, password):
+            raise AccessException('Access denied.')
+        file_data = self._readFile(ident)
+        return base64.b64encode(file_data).decode('utf8')
+
     def convert(self, data=False, identifier=False, in_mime=False, out_mime=False, username=None, password=None):
-        logger = logging.getLogger('main')
         if not self.auth(username, password):
             raise AccessException('Access denied.')
         start_time = time()
@@ -150,17 +158,7 @@ class OfficeService():
             elif data is False:
                 raise NodataException('No data to be converted.')
 
-            fname = ''
-            # generate random identifier
-            while not identifier:
-                new_ident = randint(1, MAXINT)
-                fname = self._md5(str(new_ident))
-                logger.debug('  assigning new identifier %s' % new_ident)
-                # check if there is any other such files
-                identifier = not path.isfile(self.spool_path % '_' + fname) \
-                    and not path.isfile(self.spool_path % fname) \
-                    and new_ident or False
-            fname = fname or self._md5(str(identifier))
+            fname, identifier = self._get_filename_and_identifier(identifier)
             with open(self.spool_path % '_' + fname, "a") as tmpfile:
                 tmpfile.write(data)
             logger.debug("  chunk finished %s" % self._chktime(start_time))
@@ -181,8 +179,25 @@ class OfficeService():
             traceback.print_exception(exceptionType, exceptionValue,
                                       exceptionTraceback, limit=2, file=sys.stdout)
 
+    def _get_filename_and_identifier(self, force_identifier=None):
+        fname = ''
+        # generate random identifier
+        identifier = force_identifier
+        while not identifier:
+            new_ident = randint(1, MAXINT)
+            fname = self._md5(str(new_ident))
+            logger.debug('  assigning new identifier %s' % new_ident)
+            # check if there is any other such files
+            identifier = not path.isfile(self.spool_path % '_' + fname) \
+                         and not path.isfile(self.spool_path % fname) \
+                         and new_ident or False
+        fname = fname or self._md5(str(identifier))
+        return fname, identifier
+
     def _readFile(self, ident):
-        with open(self.spool_path % self._md5(str(ident)), "r") as tmpfile:
+        spool_file_name = self._md5(str(ident))
+        logger.debug("> read id %s for spool name %s", ident, spool_file_name)
+        with open(self.spool_path % spool_file_name, "r") as tmpfile:
             data = tmpfile.read()
         return base64.b64decode(data)
 
@@ -195,10 +210,23 @@ class OfficeService():
             yield data
 
     def join(self, idents, in_mime=False, out_mime=False, username=None, password=None):
-        logger = logging.getLogger('main')
         logger.debug('Join %s identifiers: %s' % (str(len(idents)), str(idents)))
         if not self.auth(username, password):
             raise AccessException('Access denied.')
+
+        if in_mime == out_mime == 'pdf':
+            return self._join_pdf_to_pdf(idents, in_mime, out_mime)
+
+        return self._join_default(idents, in_mime, out_mime)
+
+    def _join_default(self, idents, in_mime=False, out_mime=False):
+        """
+        Join odt document to pdf or to another odt document
+        :param idents: the aeroo_resport se4rvice file identifier return by upload function to join
+        :param in_mime: accepted odt maybe other
+        :param out_mime: accpeted odt, pdf
+        :return: the join file result or raise if an error has occured
+        """
         start_time = time()
         ident = idents.pop(0)
         data = self._readFile(ident)
@@ -222,3 +250,24 @@ class OfficeService():
             logger.debug("  close document %s" % self._chktime(start_time))
         logger.debug("  join finished %s" % self._chktime(start_time))
         return base64.b64encode(result_data).decode('utf8')
+
+    def _join_pdf_to_pdf(self, idents, in_mime, out_mime):
+        logger.debug('Merge %s pdf identifiers: %s' % (str(len(idents)), str(idents)))
+        try:
+            merger = PdfFileMerger()
+            start_time = time()
+            for ident in idents:
+                file_data = self._readFile(ident)
+                merger.append(io.BytesIO(file_data))
+
+            out_file_name, _ = self._get_filename_and_identifier()
+            with open(out_file_name, 'wb') as outFile:
+                logger.debug(">write merged file %s in %s", outFile.name, self._chktime(start_time))
+                merger.write(outFile)
+                merger.close()
+            return base64.b64encode(open(out_file_name, 'rb').read()).decode('utf8')
+        except Exception as e:
+            logger.info(e)
+            logger.exception(e)
+            raise e
+
