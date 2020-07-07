@@ -201,6 +201,11 @@ class OfficeService(object):
             data = tmpfile.read()
         return base64.b64decode(data)
 
+    def _readFileUTF8(self, ident):
+        spool_file_name = self._md5(str(ident))
+        logger.debug("> read in utf-8 id %s for spool name %s", ident, spool_file_name)
+        return open(self.spool_path % spool_file_name, 'rb').read().decode('utf8')
+
     def _readFiles(self, idents):
         logger = logging.getLogger('main')
         for ident in idents:
@@ -254,20 +259,35 @@ class OfficeService(object):
     def _join_pdf_to_pdf(self, idents, in_mime, out_mime):
         logger.debug('Merge %s pdf identifiers: %s' % (str(len(idents)), str(idents)))
         try:
-            merger = PdfFileMerger()
-            start_time = time()
-            for ident in idents:
-                file_data = self._readFile(ident)
-                merger.append(io.BytesIO(file_data))
+            new_idents = []
+            while idents:
+                to_process = idents[:100]
+                idents = idents[100:]
+                start_time = time()
+                out_file_name, new_ident = self._merge_idents(to_process)
+                new_idents.append(new_ident)
+                logger.debug(">write merged file %s in %s", out_file_name, self._chktime(start_time))
 
-            out_file_name, _ = self._get_filename_and_identifier()
-            with open(out_file_name, 'wb') as outFile:
-                logger.debug(">write merged file %s in %s", outFile.name, self._chktime(start_time))
-                merger.write(outFile)
-                merger.close()
-            return base64.b64encode(open(out_file_name, 'rb').read()).decode('utf8')
+            if len(new_idents) > 1:
+                return self._join_pdf_to_pdf(new_idents, in_mime=in_mime, out_mime=out_mime)
+            return self._readFileUTF8(new_idents[0])
         except Exception as e:
             logger.info(e)
             logger.exception(e)
             raise e
+
+
+    def _merge_idents(self, idents):
+        merger = PdfFileMerger()
+        out_io = io.BytesIO()
+        for ident in idents:
+            file_data = self._readFile(ident)
+            merger.append(io.BytesIO(file_data))
+        merger.write(out_io)
+        merger.close()
+        out_file_name, new_ident = self._get_filename_and_identifier()
+        with open(self.spool_path % out_file_name, "wb") as outFile:
+            outFile.write(base64.encodebytes(out_io.getvalue()))
+        out_io.close()
+        return out_file_name, new_ident
 
